@@ -266,6 +266,7 @@ fn serialize_with_compact_formatter() {
     let compact_expected = r#"foo = 1, bar = "baz", qux { foo = "bar", baz { qux = true }, baz = "qux" }"#;
 
     let formatter = PrettyFormatter::builder()
+        .indent(b" ")
         .density(FormatDensity::Compact)
         .build();
     let mut buf = Vec::new();

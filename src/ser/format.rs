@@ -247,7 +247,7 @@ enum FormatState {
 }
 
 /// Used during pretty printing to delimit how much or little newlines are used
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum FormatDensity {
     /// Blocks are separated by a newline character
     Normal,
@@ -362,12 +362,18 @@ impl<'a> Format for PrettyFormatter<'a> {
     {
         if self.first_element {
             self.first_element = false;
-            writer.write_all(b"\n")?;
+            if self.density != FormatDensity::Compact {
+                writer.write_all(b"\n")?;
+            }
         } else {
-            writer.write_all(b",\n")?;
+            if self.density != FormatDensity::Compact {
+                writer.write_all(b",\n")?;
+            } else {
+                writer.write_all(b",")?;
+            }
         }
 
-        indent(writer, self.current_indent, self.indent)
+        indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)
     }
 
     fn end_array_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
@@ -385,8 +391,10 @@ impl<'a> Format for PrettyFormatter<'a> {
         self.current_indent -= 1;
 
         if self.has_value {
-            writer.write_all(b"\n")?;
-            indent(writer, self.current_indent, self.indent)?;
+            if self.density != FormatDensity::Compact {
+                writer.write_all(b"\n")?;
+            }
+            indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)?;
         }
 
         writer.write_all(b"]")
@@ -405,8 +413,10 @@ impl<'a> Format for PrettyFormatter<'a> {
     where
         W: ?Sized + io::Write,
     {
-        writer.write_all(b"\n")?;
-        indent(writer, self.current_indent, self.indent)
+        if self.density != FormatDensity::Compact {
+            writer.write_all(b"\n")?;
+        }
+        indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)
     }
 
     fn end_object<W>(&mut self, writer: &mut W) -> io::Result<()>
@@ -419,7 +429,7 @@ impl<'a> Format for PrettyFormatter<'a> {
             if self.density != FormatDensity::Compact {
                 writer.write_all(b"\n")?;
             }
-            indent(writer, self.current_indent, self.indent)?;
+            indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)?;
         }
 
         writer.write_all(b"}")
@@ -430,7 +440,7 @@ impl<'a> Format for PrettyFormatter<'a> {
         W: ?Sized + io::Write,
     {
         self.maybe_write_newline(writer, FormatState::AttributeStart)?;
-        indent(writer, self.current_indent, self.indent)
+        indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)
     }
 
     fn end_attribute<W>(&mut self, writer: &mut W) -> io::Result<()>
@@ -449,7 +459,7 @@ impl<'a> Format for PrettyFormatter<'a> {
         W: ?Sized + io::Write,
     {
         self.maybe_write_newline(writer, FormatState::BlockStart)?;
-        indent(writer, self.current_indent, self.indent)
+        indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)
     }
 
     fn begin_block_body<W>(&mut self, writer: &mut W) -> io::Result<()>
@@ -458,7 +468,10 @@ impl<'a> Format for PrettyFormatter<'a> {
     {
         self.current_indent += 1;
         self.state = FormatState::BlockBodyStart;
-        writer.write_all(b" {")
+        if self.density != FormatDensity::Compact {
+            writer.write_all(b" ")?
+        }
+        writer.write_all(b"{")
     }
 
     fn end_block<W>(&mut self, writer: &mut W) -> io::Result<()>
@@ -467,7 +480,7 @@ impl<'a> Format for PrettyFormatter<'a> {
     {
         self.state = FormatState::BlockEnd;
         self.current_indent -= 1;
-        indent(writer, self.current_indent, self.indent)?;
+        indent(writer, clamp_indent_count(self.density, self.current_indent), self.indent)?;
         writer.write_all(b"}")?;
         if self.density != FormatDensity::Compact {
             writer.write_all(b"\n")?;
@@ -484,12 +497,17 @@ impl<'a> PrettyFormatter<'a> {
         W: ?Sized + io::Write,
     {
         let delimiting_separator: Option<Vec::<u8>> = match (&self.density, &self.state, &next_state) {
-            (FormatDensity::Normal, FormatState::AttributeEnd, FormatState::BlockStart) => { Some("\n") },
-            (FormatDensity::Normal, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some("\n") },
-            (FormatDensity::Normal | FormatDensity::Dense, FormatState::BlockBodyStart, _) => { Some("\n") },
-            (FormatDensity::Compact, FormatState::BlockEnd | FormatState::AttributeEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some(",") },
+            (FormatDensity::Normal, FormatState::AttributeEnd, FormatState::BlockStart) => { Some(String::from("\n")) },
+            (FormatDensity::Normal, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some(String::from("\n")) },
+            (FormatDensity::Normal | FormatDensity::Dense, FormatState::BlockBodyStart, _) => { Some(String::from("\n")) },
+            (FormatDensity::Compact, FormatState::AttributeEnd, FormatState::BlockEnd) => { Some(format!("{}", String::from_utf8(self.indent.to_vec()).unwrap())) },
+            (FormatDensity::Compact, FormatState::BlockEnd, FormatState::AttributeStart) => { Some(String::from(",")) },
+            (FormatDensity::Compact, FormatState::AttributeEnd, FormatState::BlockStart | FormatState::AttributeStart) => {
+                // Some(String::from_utf8(self.indent.to_vec()).unwrap())
+                Some(format!(",{}", String::from_utf8(self.indent.to_vec()).unwrap()))
+            },
             (_, _, _) => { None },
-        }.map(|i: &str| i.chars().map(|c| c as u8).collect::<Vec<_>>());
+        }.map(|i: String| i.chars().map(|c| c as u8).collect::<Vec<_>>());
 
         if let Some(delimiting_separator) = delimiting_separator {
             writer.write_all(&delimiting_separator)?;
@@ -497,6 +515,14 @@ impl<'a> PrettyFormatter<'a> {
 
         self.state = next_state;
         Ok(())
+    }
+}
+
+fn clamp_indent_count(density: FormatDensity, count: usize) -> usize {
+    if density == FormatDensity::Compact && count > 1 {
+        1
+    } else {
+        count
     }
 }
 
