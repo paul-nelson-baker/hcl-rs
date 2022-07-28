@@ -191,7 +191,7 @@ mod format;
 #[cfg(test)]
 mod tests;
 
-pub use self::format::{Format, PrettyFormatter, PrettyFormatterBuilder};
+pub use self::format::{Format, PrettyFormatter, PrettyFormatterBuilder, FormatDensity};
 use crate::{Error, Result};
 use serde::ser::{self, Impossible, Serialize, SerializeSeq};
 use std::io;

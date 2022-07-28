@@ -246,6 +246,15 @@ enum FormatState {
     BlockBodyStart,
 }
 
+/// Used during pretty printing to delimit how much or little newlines are used
+#[derive(PartialEq)]
+pub enum FormatDensity {
+    /// Blocks are separated by a newline character
+    Normal,
+    /// Blocks are not separated by a newline character
+    Dense,
+}
+
 /// A pretty printing HCL formatter.
 ///
 /// ## Example
@@ -272,7 +281,7 @@ pub struct PrettyFormatter<'a> {
     current_indent: usize,
     has_value: bool,
     indent: &'a [u8],
-    dense: bool,
+    density: FormatDensity,
 }
 
 impl<'a> Default for PrettyFormatter<'a> {
@@ -286,7 +295,7 @@ impl<'a> Default for PrettyFormatter<'a> {
 /// See the documentation of [`PrettyFormatter`] for a usage example.
 pub struct PrettyFormatterBuilder<'a> {
     indent: &'a [u8],
-    dense: bool,
+    density: FormatDensity,
 }
 
 impl<'a> PrettyFormatterBuilder<'a> {
@@ -296,10 +305,16 @@ impl<'a> PrettyFormatterBuilder<'a> {
         self
     }
 
+    #[deprecated(since="0.7.0", note="please use `PrettyFormatterBuilder::density` instead")]
     /// If set, blocks are not visually separated by empty lines from attributes and adjacent
     /// blocks.
-    pub fn dense(mut self, yes: bool) -> Self {
-        self.dense = yes;
+    pub fn dense(self, yes: bool) -> Self {
+        self.density(if yes { FormatDensity::Dense } else { FormatDensity::Normal })
+    }
+
+    /// If set, separation between adjacent blocks and fields can be reduced
+    pub fn density(mut self, density: FormatDensity) -> Self {
+        self.density = density;
         self
     }
 
@@ -311,7 +326,7 @@ impl<'a> PrettyFormatterBuilder<'a> {
             current_indent: 0,
             has_value: false,
             indent: self.indent,
-            dense: self.dense,
+            density: self.density,
         }
     }
 }
@@ -321,7 +336,7 @@ impl<'a> PrettyFormatter<'a> {
     pub fn builder() -> PrettyFormatterBuilder<'a> {
         PrettyFormatterBuilder {
             indent: b"  ",
-            dense: false,
+            density: FormatDensity::Normal,
         }
     }
 }
@@ -457,15 +472,15 @@ impl<'a> PrettyFormatter<'a> {
     where
         W: ?Sized + io::Write,
     {
-        let newline = match (&self.dense, &self.state, &next_state) {
-            (false, FormatState::AttributeEnd, FormatState::BlockStart) => { true },
-            (false, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { true },
-            (_, FormatState::BlockBodyStart, _) => { true },
-            (_, _, _) => { false },
-        };
+        let delimiting_separator: Option<Vec::<u8>> = match (&self.density, &self.state, &next_state) {
+            (FormatDensity::Normal, FormatState::AttributeEnd, FormatState::BlockStart) => { Some("\n") },
+            (FormatDensity::Normal, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some("\n") },
+            (FormatDensity::Normal | FormatDensity::Dense, FormatState::BlockBodyStart, _) => { Some("\n") },
+            (_, _, _) => { None },
+        }.map(|i: &str| i.chars().map(|c| c as u8).collect::<Vec<_>>());
 
-        if newline {
-            writer.write_all(b"\n")?;
+        if let Some(delimiting_separator) = delimiting_separator {
+            writer.write_all(&delimiting_separator)?;
         }
 
         self.state = next_state;
