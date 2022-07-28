@@ -457,17 +457,11 @@ impl<'a> PrettyFormatter<'a> {
     where
         W: ?Sized + io::Write,
     {
-        let newline = match &self.state {
-            FormatState::AttributeEnd if !self.dense => {
-                matches!(next_state, FormatState::BlockStart)
-            }
-            FormatState::BlockEnd if !self.dense => {
-                matches!(
-                    next_state,
-                    FormatState::BlockStart | FormatState::AttributeStart
-                )
-            }
-            other => matches!(other, FormatState::BlockBodyStart),
+        let newline = match (&self.dense, &self.state, &next_state) {
+            (false, FormatState::AttributeEnd, FormatState::BlockStart) => { true },
+            (false, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { true },
+            (_, FormatState::BlockBodyStart, _) => { true },
+            (_, _, _) => { false },
         };
 
         if newline {
