@@ -253,6 +253,8 @@ pub enum FormatDensity {
     Normal,
     /// Blocks are not separated by a newline character
     Dense,
+    /// Blocks and fields are separated by a comma
+    Compact,
 }
 
 /// A pretty printing HCL formatter.
@@ -414,7 +416,9 @@ impl<'a> Format for PrettyFormatter<'a> {
         self.current_indent -= 1;
 
         if self.has_value {
-            writer.write_all(b"\n")?;
+            if self.density != FormatDensity::Compact {
+                writer.write_all(b"\n")?;
+            }
             indent(writer, self.current_indent, self.indent)?;
         }
 
@@ -434,7 +438,10 @@ impl<'a> Format for PrettyFormatter<'a> {
         W: ?Sized + io::Write,
     {
         self.state = FormatState::AttributeEnd;
-        writer.write_all(b"\n")
+        if self.density != FormatDensity::Compact {
+            writer.write_all(b"\n")?;
+        }
+        Ok(())
     }
 
     fn begin_block<W>(&mut self, writer: &mut W) -> io::Result<()>
@@ -461,7 +468,11 @@ impl<'a> Format for PrettyFormatter<'a> {
         self.state = FormatState::BlockEnd;
         self.current_indent -= 1;
         indent(writer, self.current_indent, self.indent)?;
-        writer.write_all(b"}\n")
+        writer.write_all(b"}")?;
+        if self.density != FormatDensity::Compact {
+            writer.write_all(b"\n")?;
+        }
+        Ok(())
     }
 }
 
@@ -476,6 +487,7 @@ impl<'a> PrettyFormatter<'a> {
             (FormatDensity::Normal, FormatState::AttributeEnd, FormatState::BlockStart) => { Some("\n") },
             (FormatDensity::Normal, FormatState::BlockEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some("\n") },
             (FormatDensity::Normal | FormatDensity::Dense, FormatState::BlockBodyStart, _) => { Some("\n") },
+            (FormatDensity::Compact, FormatState::BlockEnd | FormatState::AttributeEnd, FormatState::BlockStart | FormatState::AttributeStart) => { Some(",") },
             (_, _, _) => { None },
         }.map(|i: &str| i.chars().map(|c| c as u8).collect::<Vec<_>>());
 

@@ -250,6 +250,32 @@ qux {
 }
 
 #[test]
+fn serialize_with_compact_formatter() {
+    let body = Body::builder()
+        .add_attribute(("foo", 1u64))
+        .add_attribute(("bar", "baz"))
+        .add_block(
+            Block::builder("qux")
+                .add_attribute(("foo", "bar"))
+                .add_block(Block::builder("baz").add_attribute(("qux", true)).build())
+                .add_attribute(("baz", "qux"))
+                .build(),
+        )
+        .build();
+
+    let compact_expected = r#"foo = 1, bar = "baz", qux { foo = "bar", baz { qux = true }, baz = "qux" }"#;
+
+    let formatter = PrettyFormatter::builder()
+        .density(FormatDensity::Compact)
+        .build();
+    let mut buf = Vec::new();
+    let mut ser = Serializer::with_formatter(&mut buf, formatter);
+    body.serialize(&mut ser).unwrap();
+
+    assert_eq!(String::from_utf8(buf).unwrap(), compact_expected);
+}
+
+#[test]
 fn roundtrip() {
     let input = Body::builder()
         .add_block(
